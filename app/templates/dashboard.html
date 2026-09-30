@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Acompanhamento de Bases</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">J&T</div>
+      <div><strong>Base Control</strong><span>Gestão de câmeras</span></div>
+    </div>
+    <nav>
+      <button class="nav-item active" data-target="overview"><span>◫</span> Visão geral</button>
+      <button class="nav-item" data-target="bases"><span>▤</span> Bases</button>
+      <button class="nav-item" data-target="history"><span>◷</span> Histórico</button>
+      <button class="nav-item" data-target="changes"><span>↕</span> Alterações</button>
+      <button class="nav-item" data-target="import"><span>⇧</span> Atualizar dados</button>
+    </nav>
+    <div class="sidebar-note">
+      <span class="pulse"></span>
+      <div><strong>Preparado para Feishu</strong><small>Endpoint de ingestão já separado para integração futura.</small></div>
+    </div>
+    <div class="developer">Developed by: Eduardo Rodrigues</div>
+  </aside>
+
+  <main class="content">
+    {% if snapshot %}
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">ACOMPANHAMENTO OPERACIONAL</div>
+        <h1>Visão das bases</h1>
+        <p>Medição da planilha: <strong>{{ snapshot.source_date or 'não informada' }}</strong> · snapshot #{{ snapshot.id }}</p>
+      </div>
+      <div class="top-actions">
+        <a href="/relatorio.xlsx" class="btn btn-secondary">Exportar relatório</a>
+        <button class="btn btn-primary" onclick="showSection('import')">Atualizar planilha</button>
+      </div>
+    </header>
+
+    <div id="toast" class="toast"></div>
+
+    <section id="overview" class="section active-section">
+      <div class="snapshot-strip">
+        <div><span>Última captura</span><strong id="captureTime" data-iso="{{ snapshot.captured_at }}">{{ snapshot.captured_at }}</strong></div>
+        <div><span>Origem</span><strong>{{ snapshot.source }}</strong></div>
+        <div><span>Registros válidos</span><strong>{{ snapshot.row_count }}</strong></div>
+        <div class="live"><span class="pulse"></span> Histórico ativo</div>
+      </div>
+
+      <div class="kpi-grid">
+        <article class="kpi-card"><div class="kpi-icon neutral">▦</div><div><span>Total de bases</span><strong>{{ metrics.total }}</strong><small>{{ metrics.implantation }} em implantação</small></div></article>
+        <article class="kpi-card"><div class="kpi-icon good">✓</div><div><span>Em funcionamento</span><strong>{{ metrics.operational }}</strong><small>{{ metrics.operational_rate }}% do total</small></div></article>
+        <article class="kpi-card"><div class="kpi-icon danger">!</div><div><span>Sem funcionamento</span><strong>{{ metrics.offline }}</strong><small>{{ metrics.partial }} parcial · {{ metrics.deactivated }} desativada</small></div></article>
+        <article class="kpi-card"><div class="kpi-icon warn">◉</div><div><span>Câmeras off-line</span><strong>{{ metrics.cameras_offline }}</strong><small>de {{ metrics.cameras_total }} câmeras identificadas</small></div></article>
+      </div>
+
+      <div class="grid-2">
+        <article class="panel">
+          <div class="panel-head"><div><span class="panel-kicker">STATUS</span><h2>Situação das bases</h2></div><span class="pill">Atual</span></div>
+          <div class="chart-box donut-box"><canvas id="statusChart"></canvas></div>
+        </article>
+        <article class="panel">
+          <div class="panel-head"><div><span class="panel-kicker">GRAVAÇÃO</span><h2>Faixas de retenção</h2></div><span class="pill">{{ metrics.total }} bases</span></div>
+          <div class="chart-box"><canvas id="daysChart"></canvas></div>
+        </article>
+      </div>
+
+      <div class="grid-2 wide-left">
+        <article class="panel">
+          <div class="panel-head"><div><span class="panel-kicker">EVOLUÇÃO</span><h2>Histórico de funcionamento</h2></div><span class="pill">por snapshot</span></div>
+          <div class="chart-box"><canvas id="historyChart"></canvas></div>
+        </article>
+        <article class="panel attention-panel">
+          <div class="panel-head"><div><span class="panel-kicker">ATENÇÃO</span><h2>Pontos imediatos</h2></div></div>
+          <div class="attention-list">
+            <div><span class="attention-dot danger-dot"></span><div><strong>{{ metrics.offline }} bases</strong><small>sem funcionamento</small></div></div>
+            <div><span class="attention-dot warn-dot"></span><div><strong>{{ metrics.cameras_offline }} câmeras</strong><small>off-line identificadas</small></div></div>
+            <div><span class="attention-dot info-dot"></span><div><strong>{{ metrics.implantation }} bases</strong><small>em implantação</small></div></div>
+            <div><span class="attention-dot gray-dot"></span><div><strong>{{ metrics.quality_issues }} registros</strong><small>com observação de qualidade</small></div></div>
+          </div>
+        </article>
+      </div>
+
+      <article class="panel">
+        <div class="panel-head"><div><span class="panel-kicker">EXCEÇÕES</span><h2>Bases que precisam de atenção</h2></div><button class="text-btn" onclick="showSection('bases')">Ver todas →</button></div>
+        <div class="table-wrap compact-table">
+          <table><thead><tr><th>Base</th><th>Status</th><th>Gravação</th><th>Câmeras</th><th>Off-line</th><th>Observação</th></tr></thead>
+          <tbody>
+          {% for r in alerts[:10] %}
+            <tr><td><strong>{{ r.base }}</strong></td><td><span class="status-badge {{ 'ok' if r.status == 'EM FUNCIONAMENTO' else 'partial' if 'PARCIAL' in r.status else 'off' }}">{{ r.status }}</span></td><td>{{ r.recording_days_raw }}</td><td>{{ r.camera_count_raw }}</td><td><strong class="{{ 'danger-text' if (r.offline_count or 0) > 0 else '' }}">{{ r.offline_raw }}</strong></td><td class="muted">{{ r.quality_note or '—' }}</td></tr>
+          {% endfor %}
+          </tbody></table>
+        </div>
+      </article>
+    </section>
+
+    <section id="bases" class="section">
+      <div class="section-title"><div><span class="eyebrow">BASE ATUAL</span><h2>Detalhamento das bases</h2><p>Filtre e pesquise sem alterar a fonte.</p></div></div>
+      <div class="filters">
+        <label class="search"><span>⌕</span><input id="baseSearch" placeholder="Buscar base..." oninput="filterTable()"></label>
+        <select id="statusFilter" onchange="filterTable()"><option value="">Todos os status</option>{% for status in statuses %}<option value="{{ status }}">{{ status }}</option>{% endfor %}</select>
+        <select id="implantFilter" onchange="filterTable()"><option value="">Implantação + operação</option><option value="1">Somente em implantação</option><option value="0">Fora de implantação</option></select>
+        <div class="filter-count"><strong id="visibleCount">{{ records|length }}</strong> registros</div>
+      </div>
+      <article class="panel no-pad">
+        <div class="table-wrap full-table">
+          <table id="basesTable"><thead><tr><th>Base</th><th>Dias de gravação</th><th>Qtd. câmeras</th><th>Câmeras off-line</th><th>Status</th><th>Qualidade</th></tr></thead><tbody>
+          {% for r in records %}
+          <tr data-status="{{ r.status }}" data-implant="{{ '1' if r.is_implantation else '0' }}" data-base="{{ r.base|lower }}">
+            <td><strong>{{ r.base }}</strong></td><td>{{ r.recording_days_raw }}</td><td>{{ r.camera_count_raw }}</td><td><strong class="{{ 'danger-text' if (r.offline_count or 0) > 0 else '' }}">{{ r.offline_raw }}</strong></td><td><span class="status-badge {{ 'ok' if r.status == 'EM FUNCIONAMENTO' else 'partial' if 'PARCIAL' in r.status else 'off' if 'SEM FUNCIONAMENTO' in r.status else 'muted-badge' }}">{{ r.status }}</span></td><td>{% if r.quality_note %}<span class="quality-tag" title="{{ r.quality_note }}">Revisar</span>{% else %}<span class="soft-ok">OK</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+          </tbody></table>
+        </div>
+      </article>
+    </section>
+
+    <section id="history" class="section">
+      <div class="section-title"><div><span class="eyebrow">LINHA DO TEMPO</span><h2>Histórico de atualizações</h2><p>Cada importação cria um snapshot independente. O Feishu usará o mesmo mecanismo.</p></div></div>
+      <div class="history-cards">
+      {% for h in history|reverse %}
+        <article class="history-card"><div class="history-dot"></div><div><div class="history-meta"><strong>Snapshot #{{ h.id }}</strong><span class="format-date" data-iso="{{ h.captured_at }}">{{ h.captured_at }}</span></div><p>Medição: {{ h.source_date or '—' }} · origem: {{ h.source }}</p><div class="history-stats"><span><b>{{ h.total }}</b> bases</span><span><b>{{ h.operational }}</b> funcionando</span><span><b>{{ h.operational_rate }}%</b> operação</span><span><b>{{ h.cameras_offline }}</b> câmeras off-line</span></div></div></article>
+      {% endfor %}
+      </div>
+    </section>
+
+    <section id="changes" class="section">
+      <div class="section-title"><div><span class="eyebrow">COMPARATIVO</span><h2>Alterações desde o snapshot anterior</h2><p>{{ changes|length }} mudança(s) detectada(s) entre as duas últimas capturas.</p></div></div>
+      <article class="panel no-pad">
+        {% if changes %}
+        <div class="table-wrap"><table><thead><tr><th>Base</th><th>Campo alterado</th><th>Antes</th><th>Depois</th></tr></thead><tbody>{% for c in changes %}<tr><td><strong>{{ c.base }}</strong></td><td>{{ c.type }}</td><td class="before-val">{{ c.before }}</td><td class="after-val">{{ c.after }}</td></tr>{% endfor %}</tbody></table></div>
+        {% else %}<div class="empty-state"><div>↕</div><h3>Ainda não há comparação</h3><p>Importe uma nova versão da planilha para o sistema mostrar exatamente o que mudou.</p></div>{% endif %}
+      </article>
+    </section>
+
+    <section id="import" class="section">
+      <div class="section-title"><div><span class="eyebrow">ATUALIZAÇÃO</span><h2>Registrar novo momento</h2><p>Importe a planilha atualizada. Os dados antigos permanecem guardados no histórico.</p></div></div>
+      <div class="import-grid">
+        <article class="panel upload-card">
+          <form action="/importar" method="post" enctype="multipart/form-data" id="uploadForm">
+            <div class="dropzone" id="dropzone">
+              <div class="upload-icon">⇧</div>
+              <h3>Selecione a nova planilha</h3>
+              <p>Formato aceito: XLSX. A estrutura esperada é a mesma da planilha atual.</p>
+              <input type="file" name="file" id="fileInput" accept=".xlsx,.xlsm" required>
+              <label for="fileInput" class="btn btn-secondary">Escolher arquivo</label>
+              <span id="fileName">Nenhum arquivo selecionado</span>
+            </div>
+            <button class="btn btn-primary btn-wide" type="submit">Importar e registrar snapshot</button>
+          </form>
+        </article>
+        <article class="panel integration-card">
+          <span class="panel-kicker">PRÓXIMA ETAPA</span><h2>Integração Feishu</h2><p>O backend já possui uma rota de ingestão independente da interface. Quando a integração for ativada, o Feishu poderá enviar o estado atual da planilha e cada atualização ficará registrada exatamente como um novo snapshot.</p>
+          <div class="flow"><span>Feishu Sheet</span><b>→</b><span>/api/ingest</span><b>→</b><span>Snapshot</span><b>→</b><span>Dashboard</span></div>
+          <div class="integration-note">O banco usa PostgreSQL automaticamente quando o Railway fornece <code>DATABASE_URL</code>. Localmente, utiliza SQLite.</div>
+        </article>
+      </div>
+    </section>
+
+    <script>
+      window.DASH_DATA = {{ {'statuses': statuses, 'day_bands': day_bands, 'history': history}|tojson }};
+    </script>
+    {% else %}
+      <div class="empty-state"><h2>Sem dados disponíveis</h2><p>Importe uma planilha para iniciar.</p></div>
+    {% endif %}
+  </main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
